@@ -1,0 +1,75 @@
+#!/bin/bash
+
+set -e
+
+print_msg() {
+    echo "[x] $1"
+}
+
+print_error() {
+    echo "[!] $1" >&2
+}
+
+# versions
+ZIG_VERSION=0.15.2
+
+# detect aarch64 macOS
+ARCH=$(uname -m)
+OS=$(uname -s)
+if [[ "$ARCH" == "arm64" && "$OS" == "Darwin" ]]; then
+    TAR_NAME="zig-aarch64-macos-$ZIG_VERSION.tar.xz"
+else
+    print_error "Unsupported architecture: $ARCH on $OS"
+    exit 1
+fi
+
+#
+# zig
+#
+# fetch mirror list and choose a random one
+MIRRORS_FILE="community-mirrors.txt"
+MIRRORS_URL="https://ziglang.org/download/$MIRRORS_FILE"
+TEMP_DIR=$(mktemp -d)
+print_msg "Fetching mirror list from $MIRRORS_URL"
+curl --output-dir "$TEMP_DIR" -LO "$MIRRORS_URL"
+if [[ $? -ne 0 ]]; then
+    print_error "Failed to fetch mirror list from $MIRRORS_URL"
+    exit 1
+fi
+
+MIRROR=$(awk 'BEGIN{srand()} {lines[NR]=$0} END{print lines[int(rand()*NR)+1]}' "$TEMP_DIR/$MIRRORS_FILE")
+if [[ -z "$MIRROR" ]]; then
+    print_error "No mirrors found in $TEMP_DIR/$MIRRORS_FILE"
+    exit 1
+fi
+
+print_msg "Selected mirror: $MIRROR"
+print_msg "Downloading Zig $TAR_NAME from $MIRROR"
+curl --output-dir "$TEMP_DIR" -LO "$MIRROR/$TAR_NAME?source=soup"
+if [[ $? -ne 0 ]]; then
+    print_error "Failed to download Zig from $MIRROR/$TAR_NAME"
+    exit 1
+fi
+
+# verified offline with:
+# minisign -Vm zig-aarch64-macos-0.15.2.tar.xz -P RWSGOq2NVecA2UPNdBUZykf1CCb147pkmdtYxgb3Ti+JO/wCYvhbAb/U
+#
+# ensure hash matches expected
+EXPECTED_HASH=3cc2bab367e185cdfb27501c4b30b1b0653c28d9f73df8dc91488e66ece5fa6b
+DOWNLOADED_HASH=$(shasum -a 256 "$TEMP_DIR/$TAR_NAME" | awk '{print $1}')
+if [[ "$EXPECTED_HASH" != "$DOWNLOADED_HASH" ]]; then
+    print_error "Hash mismatch! Expected $EXPECTED_HASH but got $DOWNLOADED_HASH"
+    exit 1
+fi
+
+ZIG_DIR=third-party/zig
+print_msg "Installing Zig to $ZIG_DIR"
+rm -rf "$ZIG_DIR"
+mkdir -p "$ZIG_DIR"
+tar -xf "$TEMP_DIR/$TAR_NAME" --strip-components=1 -C "$ZIG_DIR"
+
+print_msg "Cleaning up"
+rm -rf "$TEMP_DIR"
+
+echo "[✔] Setup complete."
+

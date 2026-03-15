@@ -1,0 +1,7 @@
+*.o
+build.log
+build/
+errors.err
+out.txt
+third-party/
+
