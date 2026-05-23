@@ -6,81 +6,184 @@ print_msg() {
     echo "[x] $1"
 }
 
+print_success() {
+    echo "[✔] $1"
+}
+
 print_error() {
     echo "[!] $1" >&2
 }
 
 # versions
 ZIG_VERSION=0.15.2
+CMAKE_VERSION=4.2.1
+CMOCKA_VERSION=2.0.2
 
-# detect architecture and os
-ARCH=$(uname -m)
-OS=$(uname -s)
-if [[ "$ARCH" == "arm64" && "$OS" == "Darwin" ]]; then
-    # aarch64 macOS
-    SLUG="zig-aarch64-macos-$ZIG_VERSION"
-    TAR_NAME="$SLUG.tar.xz"
-    EXPECTED_HASH=3cc2bab367e185cdfb27501c4b30b1b0653c28d9f73df8dc91488e66ece5fa6b
-elif [[ "$ARCH" == "x86_64" && "$OS" == MINGW64_NT* ]]; then
-    # x86_64 windows
-    SLUG="zig-x86_64-windows-$ZIG_VERSION"
-    TAR_NAME="$SLUG.zip"
-    EXPECTED_HASH=3a0ed1e8799a2f8ce2a6e6290a9ff22e6906f8227865911fb7ddedc3cc14cb0c
-else
-    print_error "Unsupported architecture: $ARCH on $OS"
-    exit 1
-fi
+ZIG_DIR=third-party/zig
+CMAKE_DIR=third-party/cmake
+CMOCKA_DIR=third-party/cmocka
+
+ZIG=$(pwd)/$ZIG_DIR/zig
+CC="$ZIG cc"
+CXX="$ZIG c++"
+CFLAGS="-O2"
+CXXFLAGS="-O2"
+
+install_zig() {
+    # detect architecture and os
+    ARCH=$(uname -m)
+    OS=$(uname -s)
+    if [[ "$ARCH" == "arm64" && "$OS" == "Darwin" ]]; then
+        # aarch64 macOS
+        SLUG="zig-aarch64-macos-$ZIG_VERSION"
+        TAR_NAME="$SLUG.tar.xz"
+        EXPECTED_HASH=3cc2bab367e185cdfb27501c4b30b1b0653c28d9f73df8dc91488e66ece5fa6b
+    elif [[ "$ARCH" == "x86_64" && "$OS" == MINGW64_NT* ]]; then
+        # x86_64 windows
+        SLUG="zig-x86_64-windows-$ZIG_VERSION"
+        TAR_NAME="$SLUG.zip"
+        EXPECTED_HASH=3a0ed1e8799a2f8ce2a6e6290a9ff22e6906f8227865911fb7ddedc3cc14cb0c
+    else
+        print_error "Unsupported architecture: $ARCH on $OS"
+        exit 1
+    fi
+
+    # fetch mirror list and choose a random one
+    MIRRORS_FILE="community-mirrors.txt"
+    MIRRORS_URL="https://ziglang.org/download/$MIRRORS_FILE"
+    TEMP_DIR=$(mktemp -d)
+    print_msg "Fetching Zig mirror list from $MIRRORS_URL"
+    curl --output-dir "$TEMP_DIR" -LO "$MIRRORS_URL"
+    if [[ $? -ne 0 ]]; then
+        print_error "Failed to fetch mirror list from $MIRRORS_URL"
+        exit 1
+    fi
+
+    MIRROR=$(awk 'BEGIN{srand()} {lines[NR]=$0} END{print lines[int(rand()*NR)+1]}' "$TEMP_DIR/$MIRRORS_FILE")
+    if [[ -z "$MIRROR" ]]; then
+        print_error "No mirrors found in $TEMP_DIR/$MIRRORS_FILE"
+        exit 1
+    fi
+
+    print_msg "Selected mirror: $MIRROR"
+    print_msg "Downloading Zig $TAR_NAME from $MIRROR"
+    curl --output-dir "$TEMP_DIR" -LO "$MIRROR/$TAR_NAME?source=soup"
+    if [[ $? -ne 0 ]]; then
+        print_error "Failed to download Zig from $MIRROR/$TAR_NAME"
+        exit 1
+    fi
+
+    # verified offline with:
+    # minisign -Vm $TAR -P RWSGOq2NVecA2UPNdBUZykf1CCb147pkmdtYxgb3Ti+JO/wCYvhbAb/U
+    #
+    # ensure hash matches expected
+    DOWNLOADED_HASH=$(shasum -a 256 "$TEMP_DIR/$TAR_NAME" | awk '{print $1}')
+    if [[ "$EXPECTED_HASH" != "$DOWNLOADED_HASH" ]]; then
+        print_error "Hash mismatch! Expected $EXPECTED_HASH but got $DOWNLOADED_HASH"
+        exit 1
+    fi
+
+    print_msg "Installing Zig to $ZIG_DIR"
+    rm -rf "$ZIG_DIR"
+    mkdir -p "$ZIG_DIR"
+    if [[ "$TAR_NAME" == *.zip ]]; then
+        unzip -q "$TEMP_DIR/$TAR_NAME" -d "$TEMP_DIR"
+        mv "$TEMP_DIR/$SLUG"/* "$ZIG_DIR/"
+    else
+        tar -xf "$TEMP_DIR/$TAR_NAME" --strip-components=1 -C "$ZIG_DIR"
+    fi
+
+    touch "$ZIG_DIR/.installed"
+    print_success "Zig setup complete."
+}
+
+install_cmake() {
+    CMAKE_REPO=https://gitlab.kitware.com/cmake/cmake.git
+    print_msg "Cloning CMake $CMAKE_VERSION to $CMAKE_DIR"
+    rm -rf $CMAKE_DIR
+    git clone --revision=v$CMAKE_VERSION $CMAKE_REPO third-party/cmake
+
+    # avoid ProcessFdQuotaExceeded errors
+    # https://github.com/ziglang/zig/issues/23273
+    ULIMIT=$(ulimit -Sn)
+    ulimit -Sn 4096 || print_error "Could not increase file descriptor limit, proceeding with current limit"
+
+    print_msg "Building CMake, this may take a while..."
+    # see Source/kwsys/RegularExpression.cxx:1167
+    CFLAGS="$CFLAGS -fno-sanitize=pointer-overflow"
+    CXXFLAGS="$CXXFLAGS -fno-sanitize=pointer-overflow"
+
+    # Route ar/ranlib through zig's bundled LLVM tools. GNU binutils' ranlib
+    # produces a __.SYMDEF format that zig ld (LLD) rejects with
+    # "unknown cpu architecture: 0".
+    TOOLCHAIN_DIR="$(pwd)/build/toolchain"
+    mkdir -p "$TOOLCHAIN_DIR"
+    cat > "$TOOLCHAIN_DIR/ar" <<EOF
+#!/bin/bash
+exec $ZIG ar "\$@"
+EOF
+    cat > "$TOOLCHAIN_DIR/ranlib" <<EOF
+#!/bin/bash
+exec $ZIG ranlib "\$@"
+EOF
+    chmod +x "$TOOLCHAIN_DIR/ar" "$TOOLCHAIN_DIR/ranlib"
+    export PATH="$TOOLCHAIN_DIR:$PATH"
+
+    # zig cc ignores -bundle and falls through to executable-mode linking
+    # (-e _main), which fails for MODULE library targets. Override cmake's
+    # Darwin defaults to use -dynamiclib instead (still dlopen-able).
+    cat > "$TOOLCHAIN_DIR/overrides.cmake" <<'EOF'
+set(CMAKE_SHARED_MODULE_CREATE_C_FLAGS "-dynamiclib -Wl,-headerpad_max_install_names")
+set(CMAKE_SHARED_MODULE_CREATE_CXX_FLAGS "-dynamiclib -Wl,-headerpad_max_install_names")
+EOF
+
+    pushd $CMAKE_DIR > /dev/null
+    CC="$CC" CXX="$CXX" CFLAGS="$CFLAGS" CXXFLAGS="$CXXFLAGS" ./bootstrap --init="$TOOLCHAIN_DIR/overrides.cmake" --parallel=$(sysctl -n hw.ncpu) &&
+    ./Bootstrap.cmk/cmake -DCMAKE_USER_MAKE_RULES_OVERRIDE="$TOOLCHAIN_DIR/overrides.cmake" . > /dev/null
+    CC="$CC" CXX="$CXX" CFLAGS="$CFLAGS" CXXFLAGS="$CXXFLAGS" make
+    popd > /dev/null
+
+    touch "$CMAKE_DIR/.installed"
+    print_success "cmake setup complete."
+}
+
+install_cmocka() {
+    print_msg "Cloning cmocka $CMOCKA_VERSION to $CMOCKA_DIR"
+    git clone --revision=cmocka-$CMOCKA_VERSION https://git.cryptomilk.org/projects/cmocka.git $CMOCKA_DIR
+    # TODO build cmocka with cmake
+
+    touch "$CMOCKA_DIR/.installed"
+    print_success "cmocka setup complete."
+}
 
 #
 # zig
 #
-# fetch mirror list and choose a random one
-MIRRORS_FILE="community-mirrors.txt"
-MIRRORS_URL="https://ziglang.org/download/$MIRRORS_FILE"
-TEMP_DIR=$(mktemp -d)
-print_msg "Fetching mirror list from $MIRRORS_URL"
-curl --output-dir "$TEMP_DIR" -LO "$MIRRORS_URL"
-if [[ $? -ne 0 ]]; then
-    print_error "Failed to fetch mirror list from $MIRRORS_URL"
-    exit 1
-fi
-
-MIRROR=$(awk 'BEGIN{srand()} {lines[NR]=$0} END{print lines[int(rand()*NR)+1]}' "$TEMP_DIR/$MIRRORS_FILE")
-if [[ -z "$MIRROR" ]]; then
-    print_error "No mirrors found in $TEMP_DIR/$MIRRORS_FILE"
-    exit 1
-fi
-
-print_msg "Selected mirror: $MIRROR"
-print_msg "Downloading Zig $TAR_NAME from $MIRROR"
-curl --output-dir "$TEMP_DIR" -LO "$MIRROR/$TAR_NAME?source=soup"
-if [[ $? -ne 0 ]]; then
-    print_error "Failed to download Zig from $MIRROR/$TAR_NAME"
-    exit 1
-fi
-
-# verified offline with:
-# minisign -Vm $TAR -P RWSGOq2NVecA2UPNdBUZykf1CCb147pkmdtYxgb3Ti+JO/wCYvhbAb/U
-#
-# ensure hash matches expected
-DOWNLOADED_HASH=$(shasum -a 256 "$TEMP_DIR/$TAR_NAME" | awk '{print $1}')
-if [[ "$EXPECTED_HASH" != "$DOWNLOADED_HASH" ]]; then
-    print_error "Hash mismatch! Expected $EXPECTED_HASH but got $DOWNLOADED_HASH"
-    exit 1
-fi
-
-ZIG_DIR=third-party/zig
-print_msg "Installing Zig to $ZIG_DIR"
-rm -rf "$ZIG_DIR"
-mkdir -p "$ZIG_DIR"
-if [[ "$TAR_NAME" == *.zip ]]; then
-    unzip -q "$TEMP_DIR/$TAR_NAME" -d "$TEMP_DIR"
-    mv "$TEMP_DIR/$SLUG"/* "$ZIG_DIR/"
+if [[ ! -f "$ZIG_DIR/.installed" ]]; then
+    install_zig
 else
-    tar -xf "$TEMP_DIR/$TAR_NAME" --strip-components=1 -C "$ZIG_DIR"
+    print_success "Zig already installed, skipping."
+fi
+
+#
+# cmake
+#
+if [[ ! -f "$CMAKE_DIR/.installed" ]]; then
+    install_cmake
+else
+    print_success "CMake already installed, skipping."
+fi
+
+#
+# cmocka
+#
+if [[ ! -f "third-party/cmocka/.installed" ]]; then
+    install_cmocka
+else
+    print_success "cmocka already installed, skipping."
 fi
 
 print_msg "Cleaning up"
 rm -rf "$TEMP_DIR"
 
-echo "[✔] Setup complete."
+print_success "Setup complete."
