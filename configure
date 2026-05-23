@@ -29,6 +29,15 @@ CXX="$ZIG c++"
 CFLAGS="-O2"
 CXXFLAGS="-O2"
 
+# zig's LLD Mach-O backend, unlike Apple's ld64, does not dedupe duplicate
+# LC_LOAD_DYLIB entries. CMake's FindCURL adds libcurl both via
+# IMPORTED_LOCATION and INTERFACE_LINK_LIBRARIES (pkg-config), so it lands
+# on the link line twice and dyld4 (macOS 13+) refuses to load the binary.
+# -dead_strip_dylibs drops the unreferenced second copy.
+LDFLAGS="-Wl,-dead_strip_dylibs"
+
+CMAKE=$(pwd)/$CMAKE_DIR/bin/cmake
+
 install_zig() {
     # detect architecture and os
     ARCH=$(uname -m)
@@ -138,9 +147,9 @@ set(CMAKE_SHARED_MODULE_CREATE_CXX_FLAGS "-dynamiclib -Wl,-headerpad_max_install
 EOF
 
     pushd $CMAKE_DIR > /dev/null
-    CC="$CC" CXX="$CXX" CFLAGS="$CFLAGS" CXXFLAGS="$CXXFLAGS" ./bootstrap --init="$TOOLCHAIN_DIR/overrides.cmake" --parallel=$(sysctl -n hw.ncpu) &&
+    CC="$CC" CXX="$CXX" CFLAGS="$CFLAGS" CXXFLAGS="$CXXFLAGS" LDFLAGS="$LDFLAGS" ./bootstrap --init="$TOOLCHAIN_DIR/overrides.cmake" --parallel=$(sysctl -n hw.ncpu) &&
     ./Bootstrap.cmk/cmake -DCMAKE_USER_MAKE_RULES_OVERRIDE="$TOOLCHAIN_DIR/overrides.cmake" . > /dev/null
-    CC="$CC" CXX="$CXX" CFLAGS="$CFLAGS" CXXFLAGS="$CXXFLAGS" make
+    CC="$CC" CXX="$CXX" CFLAGS="$CFLAGS" CXXFLAGS="$CXXFLAGS" LDFLAGS="$LDFLAGS" make
     popd > /dev/null
 
     touch "$CMAKE_DIR/.installed"
@@ -150,7 +159,13 @@ EOF
 install_cmocka() {
     print_msg "Cloning cmocka $CMOCKA_VERSION to $CMOCKA_DIR"
     git clone --revision=cmocka-$CMOCKA_VERSION https://git.cryptomilk.org/projects/cmocka.git $CMOCKA_DIR
-    # TODO build cmocka with cmake
+
+    print_msg "Building cmocka..."
+    pushd $CMOCKA_DIR > /dev/null
+    $CMAKE -S . -B build
+    $CMAKE --build build
+    $CMAKE --build build --target test
+    popd > /dev/null
 
     touch "$CMOCKA_DIR/.installed"
     print_success "cmocka setup complete."
