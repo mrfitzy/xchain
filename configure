@@ -2,6 +2,16 @@
 
 set -e
 
+# versions
+ZIG_VERSION=0.15.2
+CMAKE_VERSION=4.2.1
+CMOCKA_VERSION=2.0.2
+
+# installation directories
+ZIG_DIR=third-party/zig
+CMAKE_DIR=third-party/cmake
+CMOCKA_DIR=third-party/cmocka
+
 print_msg() {
     echo "[x] $1"
 }
@@ -13,15 +23,6 @@ print_success() {
 print_error() {
     echo "[!] $1" >&2
 }
-
-# versions
-ZIG_VERSION=0.15.2
-CMAKE_VERSION=4.2.1
-CMOCKA_VERSION=2.0.2
-
-ZIG_DIR=third-party/zig
-CMAKE_DIR=third-party/cmake
-CMOCKA_DIR=third-party/cmocka
 
 ZIG=$(pwd)/$ZIG_DIR/zig
 CC="$ZIG cc"
@@ -35,8 +36,6 @@ CXXFLAGS="-O2"
 # on the link line twice and dyld4 (macOS 13+) refuses to load the binary.
 # -dead_strip_dylibs drops the unreferenced second copy.
 LDFLAGS="-Wl,-dead_strip_dylibs"
-
-CMAKE=$(pwd)/$CMAKE_DIR/bin/cmake
 
 install_zig() {
     # detect architecture and os
@@ -105,6 +104,8 @@ install_zig() {
     touch "$ZIG_DIR/.installed"
     print_success "Zig setup complete."
 }
+
+CMAKE=$(pwd)/$CMAKE_DIR/bin/cmake
 
 install_cmake() {
     CMAKE_REPO=https://gitlab.kitware.com/cmake/cmake.git
@@ -192,7 +193,7 @@ fi
 #
 # cmocka
 #
-if [[ ! -f "third-party/cmocka/.installed" ]]; then
+if [[ ! -f "$CMOCKA_DIR/.installed" ]]; then
     install_cmocka
 else
     print_success "cmocka already installed, skipping."
