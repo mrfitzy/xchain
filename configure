@@ -6,11 +6,13 @@ set -e
 ZIG_VERSION=0.15.2
 CMAKE_VERSION=4.2.1
 CMOCKA_VERSION=2.0.2
+SDL3_VERSION=3.4.8
 
 # installation directories
 ZIG_DIR=third-party/zig
 CMAKE_DIR=third-party/cmake
 CMOCKA_DIR=third-party/cmocka
+SDL3_DIR=third-party/sdl3
 
 print_msg() {
     echo "[x] $1"
@@ -172,6 +174,23 @@ install_cmocka() {
     print_success "cmocka setup complete."
 }
 
+install_sdl3() {
+    #print_msg "Cloning SDL3 $SDL3_VERSION to $SDL3_DIR"
+    #git clone --revision=release-$SDL3_VERSION https://github.com/libsdl-org/SDL.git $SDL3_DIR
+
+    # TODO needs to work on non-Mac
+    # https://github.com/libsdl-org/SDL/blob/main/docs/README-cmake.md
+    print_msg "Building SDL3..."
+    pushd $SDL3_DIR > /dev/null
+    git clean -fdx
+    #CC="$CC" CXX="$CXX" CFLAGS="$CFLAGS" CXXFLAGS="$CXXFLAGS" LDFLAGS="$LDFLAGS" $CMAKE -S . -B build -DSDL_FRAMEWORK=ON -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64"
+    $CMAKE -S . -B build -DSDL_FRAMEWORK=ON -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64"
+    popd > /dev/null
+
+    touch "$SDL3_DIR/.configured"
+    print_success "SDL3 setup complete."
+}
+
 #
 # zig
 #
@@ -197,6 +216,15 @@ if [[ ! -f "$CMOCKA_DIR/.configured" ]]; then
     install_cmocka
 else
     print_success "cmocka already configured, skipping."
+fi
+
+#
+# SDL3
+#
+if [[ ! -f "$SDL3_DIR/.configured" ]]; then
+    install_sdl3
+else
+    print_success "SDL3 already configured, skipping."
 fi
 
 print_msg "Cleaning up"
