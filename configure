@@ -101,7 +101,7 @@ install_zig() {
         tar -xf "$TEMP_DIR/$TAR_NAME" --strip-components=1 -C "$ZIG_DIR"
     fi
 
-    touch "$ZIG_DIR/.installed"
+    touch "$ZIG_DIR/.configured"
     print_success "Zig setup complete."
 }
 
@@ -153,7 +153,7 @@ EOF
     CC="$CC" CXX="$CXX" CFLAGS="$CFLAGS" CXXFLAGS="$CXXFLAGS" LDFLAGS="$LDFLAGS" make
     popd > /dev/null
 
-    touch "$CMAKE_DIR/.installed"
+    touch "$CMAKE_DIR/.configured"
     print_success "cmake setup complete."
 }
 
@@ -168,35 +168,35 @@ install_cmocka() {
     $CMAKE --build build --target test
     popd > /dev/null
 
-    touch "$CMOCKA_DIR/.installed"
+    touch "$CMOCKA_DIR/.configured"
     print_success "cmocka setup complete."
 }
 
 #
 # zig
 #
-if [[ ! -f "$ZIG_DIR/.installed" ]]; then
+if [[ ! -f "$ZIG_DIR/.configured" ]]; then
     install_zig
 else
-    print_success "Zig already installed, skipping."
+    print_success "Zig already configured, skipping."
 fi
 
 #
 # cmake
 #
-if [[ ! -f "$CMAKE_DIR/.installed" ]]; then
+if [[ ! -f "$CMAKE_DIR/.configured" ]]; then
     install_cmake
 else
-    print_success "CMake already installed, skipping."
+    print_success "CMake already configured, skipping."
 fi
 
 #
 # cmocka
 #
-if [[ ! -f "$CMOCKA_DIR/.installed" ]]; then
+if [[ ! -f "$CMOCKA_DIR/.configured" ]]; then
     install_cmocka
 else
-    print_success "cmocka already installed, skipping."
+    print_success "cmocka already configured, skipping."
 fi
 
 print_msg "Cleaning up"
