@@ -163,9 +163,9 @@ install_cmocka() {
 
     print_msg "Building cmocka..."
     pushd $CMOCKA_DIR > /dev/null
-    $CMAKE -S . -B build
-    $CMAKE --build build
-    $CMAKE --build build --target test
+    CC="$CC" CXX="$CXX" CFLAGS="$CFLAGS" CXXFLAGS="$CXXFLAGS" LDFLAGS="$LDFLAGS" $CMAKE -S . -B build
+    CC="$CC" CXX="$CXX" CFLAGS="$CFLAGS" CXXFLAGS="$CXXFLAGS" LDFLAGS="$LDFLAGS" $CMAKE --build build
+    CC="$CC" CXX="$CXX" CFLAGS="$CFLAGS" CXXFLAGS="$CXXFLAGS" LDFLAGS="$LDFLAGS" $CMAKE --build build --target test
     popd > /dev/null
 
     touch "$CMOCKA_DIR/.configured"
