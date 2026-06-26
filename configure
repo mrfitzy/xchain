@@ -41,7 +41,12 @@ install_zig() {
     # detect architecture and os
     ARCH=$(uname -m)
     OS=$(uname -s)
-    if [[ "$ARCH" == "arm64" && "$OS" == "Darwin" ]]; then
+    if [[ "$ARCH" == "aarch64" && "$OS" == "Linux" ]]; then
+        # aarch64 linux
+        SLUG="zig-aarch64-linux-$ZIG_VERSION"
+        TAR_NAME="$SLUG.tar.xz"
+        EXPECTED_HASH=958ed7d1e00d0ea76590d27666efbf7a932281b3d7ba0c6b01b0ff26498f667f
+    elif [[ "$ARCH" == "arm64" && "$OS" == "Darwin" ]]; then
         # aarch64 macOS
         SLUG="zig-aarch64-macos-$ZIG_VERSION"
         TAR_NAME="$SLUG.tar.xz"
